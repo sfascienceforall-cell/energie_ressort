@@ -1,0 +1,167 @@
+<style>
+*{box-sizing:border-box;margin:0;padding:0;}
+body{background:#ffffff;font-family:system-ui,-apple-system,sans-serif;}
+canvas{display:block;border-radius:12px;border:1.5px solid #e8e8e8;touch-action:none;}
+.btn{padding:7px 16px;border-radius:20px;font-size:13px;font-weight:500;cursor:pointer;border:1.5px solid #d0d0d0;background:#fff;color:#2c2c2a;}
+.btn.on{border-color:#185fa5;background:#e6f1fb;color:#185fa5;}
+.btn.red{border-color:#f09595;background:#fcebeb;color:#a32d2d;}
+.row{display:flex;align-items:center;gap:8px;margin:6px 0;flex-wrap:wrap;}
+.lbl{min-width:150px;font-size:13px;font-weight:500;color:#2c2c2a;background:#f5f5f5;border:1.5px solid #d0d0d0;border-radius:20px;padding:6px 16px;white-space:nowrap;}
+.val{min-width:62px;text-align:center;font-size:13px;font-weight:500;color:#2c2c2a;background:#f5f5f5;border:1.5px solid #d0d0d0;border-radius:20px;padding:6px 12px;}
+</style>
+
+<canvas id="cv" style="width:100%;height:64vh;min-height:400px;"></canvas>
+
+<div id="fml" style="font-size:13px;padding:10px 16px;border-radius:20px;background:#f5f5f5;border:1.5px solid #d0d0d0;color:#2c2c2a;margin:8px 0;font-family:ui-monospace,monospace;line-height:1.8;">
+  Barre = énergie : <span style="color:#378ADD">U=½k·y²</span> (déformé) ↔ <span style="color:#E24B4A">K=½mv²</span> (rapide) &nbsp;|&nbsp; <span style="color:#378ADD">y(t)</span> oscille autour de l'équilibre
+</div>
+
+<div class="row">
+  <span class="lbl">Amplitude de lâcher</span>
+  <input type="range" id="a0" min="40" max="100" value="90" step="1" style="flex:1;min-width:80px;accent-color:#378ADD;">
+  <span class="val" id="a0v">90 %</span>
+</div>
+<div class="row">
+  <span class="lbl">Frottement (Wₐ)</span>
+  <input type="range" id="fr" min="0" max="120" value="0" step="1" style="flex:1;min-width:80px;accent-color:#E24B4A;">
+  <span class="val" id="frv" style="color:#a32d2d;border-color:#f09595;">0.00</span>
+</div>
+<div class="row">
+  <span class="lbl">Vitesse d'animation</span>
+  <input type="range" id="sp" min="20" max="100" value="75" step="1" style="flex:1;min-width:80px;accent-color:#1D9E75;">
+  <span class="val" id="spv" style="color:#0F6E56;">0.75×</span>
+</div>
+<div class="row">
+  <button class="btn on"  id="f0" onclick="setFr(0)">Sans frott.</button>
+  <button class="btn"     id="f1" onclick="setFr(30)">Frott. faible</button>
+  <button class="btn on"  id="bp" onclick="togglePause()">Pause</button>
+  <button class="btn red" onclick="restart()">Recommencer</button>
+</div>
+
+<script>
+const cv=document.getElementById('cv'), ctx=cv.getContext('2d');
+const C_Y='#378ADD', C_V='#E24B4A', C_U='#378ADD', C_K='#E24B4A', C_E='#1D9E75', INK='#3d3d3a', MUTE='#888';
+const k=5.0, m=1.0, A=2.6, W_=Math.sqrt(5.0);
+let y=2.3, v=0, b=0, A0=2.3, E0=1, speed=0.75;
+let paused=false, W=0,H=0;
+let sceneW=0, ceilY=0, eqTopY=0, boxW=0, boxH=0, ampPX=1, xSp=0, xBar=0, eqCy=0;
+let gx=0,gw=0,gTop=0,gBot=0, hist=[], maxN=260;
+
+function setFr(val){document.getElementById('fr').value=val;syncFr();markBtns();}
+function syncFr(){b=parseFloat(document.getElementById('fr').value)/100;document.getElementById('frv').textContent=b.toFixed(2);}
+function markBtns(){const val=parseFloat(document.getElementById('fr').value);
+  document.getElementById('f0').className=(val==0)?'btn on':'btn';document.getElementById('f1').className=(val==30)?'btn on':'btn';}
+function togglePause(){paused=!paused;const btn=document.getElementById('bp');btn.textContent=paused?'Reprendre':'Pause';btn.className=paused?'btn':'btn on';}
+function restart(){A0=A*parseFloat(document.getElementById('a0').value)/100;y=A0;v=0;E0=0.5*k*A0*A0;hist=[];syncFr();markBtns();}
+document.getElementById('a0').addEventListener('input',function(){document.getElementById('a0v').textContent=this.value+' %';restart();});
+document.getElementById('fr').addEventListener('input',function(){syncFr();markBtns();});
+document.getElementById('sp').addEventListener('input',function(){speed=+this.value/100;document.getElementById('spv').textContent=speed.toFixed(2)+'×';});
+
+function step(dt){const a=(-k*y-b*v)/m; v+=a*dt; y+=v*dt;}
+
+function layout(){
+  const r=cv.parentElement.getBoundingClientRect();
+  const nW=Math.round(r.width)||700, nH=Math.round(cv.getBoundingClientRect().height)||400;
+  if(nW!==W||nH!==H){
+    W=nW;H=nH;cv.width=W;cv.height=H;
+    sceneW=W*0.46;
+    ceilY=H*0.07; boxW=sceneW*0.22; boxH=H*0.12;
+    eqTopY=H*0.50; eqCy=eqTopY+boxH/2;
+    const minSpring=H*0.10;
+    const AmaxPx=Math.min(eqTopY-ceilY-minSpring, H-(eqTopY+boxH)-H*0.14, H*0.30);
+    ampPX=AmaxPx/A;
+    xSp=sceneW*0.30; xBar=sceneW*0.74;
+    gx=W*0.52; gw=W*0.44;
+    const halfH=Math.min(eqCy-H*0.08, H*0.93-eqCy, H*0.33);
+    gTop=eqCy-halfH; gBot=eqCy+halfH;
+    maxN=Math.max(120,Math.round(gw));
+  }
+}
+function coil(x,y1,y2,turns){
+  const lead=12, len=y2-y1-2*lead, seg=len/turns, amp=boxW*0.34;
+  ctx.beginPath();ctx.moveTo(x,y1);ctx.lineTo(x,y1+lead);
+  for(let i=0;i<turns;i++){const sy0=y1+lead+i*seg;ctx.lineTo(x-amp,sy0+seg*0.25);ctx.lineTo(x+amp,sy0+seg*0.75);ctx.lineTo(x,sy0+seg);}
+  ctx.lineTo(x,y2);
+  const defo=Math.min(1,Math.abs(y)/A);
+  ctx.strokeStyle='rgb('+Math.round(120-40*defo)+','+Math.round(140-30*defo)+','+Math.round(160+60*defo)+')';
+  ctx.lineWidth=2.5;ctx.lineJoin='round';ctx.stroke();
+}
+
+function frame(){
+  layout(); if(W===0){requestAnimationFrame(frame);return;}
+  if(!paused){const s=speed;for(let i=0;i<6;i++) step(0.006*s);}
+  ctx.fillStyle='#ffffff';ctx.fillRect(0,0,W,H);
+
+  const yPx=y*ampPX, boxTop=eqTopY+yPx, boxCy=boxTop+boxH/2;
+  const U=0.5*k*y*y, K=0.5*m*v*v, E=U+K;
+
+  // ligne d'équilibre continue (scène + graphe)
+  ctx.strokeStyle='rgba(0,0,0,0.28)';ctx.lineWidth=1;ctx.setLineDash([4,4]);
+  ctx.beginPath();ctx.moveTo(0,eqCy);ctx.lineTo(W,eqCy);ctx.stroke();ctx.setLineDash([]);
+  ctx.fillStyle=MUTE;ctx.font='10px system-ui,sans-serif';ctx.textAlign='left';ctx.fillText('équilibre (y = 0)',6,eqCy-5);
+
+  // plafond (au-dessus du ressort)
+  const cL=xSp-boxW*0.7, cR=xSp+boxW*0.7;
+  ctx.strokeStyle=INK;ctx.lineWidth=2.5;ctx.beginPath();ctx.moveTo(cL,ceilY);ctx.lineTo(cR,ceilY);ctx.stroke();
+  ctx.strokeStyle='#bbb';ctx.lineWidth=1;
+  for(let hx=cL;hx<cR;hx+=10){ctx.beginPath();ctx.moveTo(hx,ceilY);ctx.lineTo(hx-7,ceilY-7);ctx.stroke();}
+
+  // ressort + masse
+  coil(xSp, ceilY, boxTop, 8);
+  ctx.fillStyle='#eef4fb';ctx.strokeStyle='#185fa5';ctx.lineWidth=2;
+  ctx.fillRect(xSp-boxW/2,boxTop,boxW,boxH);ctx.strokeRect(xSp-boxW/2,boxTop,boxW,boxH);
+  ctx.fillStyle='#185fa5';ctx.font='italic 600 16px Georgia,serif';ctx.textAlign='center';ctx.fillText('m',xSp,boxCy+5);
+
+  // ===== BARRE D'ÉNERGIE (corrélée à l'avancée) =====
+  const barBot=H*0.84, barTop=H*0.16, barMax=barBot-barTop, wB=sceneW*0.14;
+  const scale=barMax/(E0*1.04);
+  const uH=U*scale, kH=K*scale, disH=Math.max(0,(E0-E))*scale;
+  // cadre
+  ctx.strokeStyle='#e0e0e0';ctx.lineWidth=1.5;ctx.strokeRect(xBar-wB/2,barTop,wB,barMax);
+  // U (bas, bleu) + K (haut, rouge)
+  ctx.fillStyle=C_U;ctx.fillRect(xBar-wB/2,barBot-uH,wB,uH);
+  ctx.fillStyle=C_K;ctx.fillRect(xBar-wB/2,barBot-uH-kH,wB,kH);
+  // dissipé (si frottement)
+  if(disH>1){ctx.fillStyle='rgba(216,90,48,0.18)';ctx.fillRect(xBar-wB/2,barBot-uH-kH-disH,wB,disH);}
+  // ligne E0
+  ctx.strokeStyle=C_E;ctx.lineWidth=1.5;ctx.setLineDash([4,3]);
+  const e0y=barBot-E0*scale;ctx.beginPath();ctx.moveTo(xBar-wB/2-6,e0y);ctx.lineTo(xBar+wB/2+6,e0y);ctx.stroke();ctx.setLineDash([]);
+  ctx.fillStyle=C_E;ctx.font='500 11px system-ui,sans-serif';ctx.textAlign='center';ctx.fillText('E constante',xBar,e0y-6);
+  // étiquettes K / U dans les segments
+  ctx.font='600 12px system-ui,sans-serif';
+  if(kH>16){ctx.fillStyle='#fff';ctx.fillText('K',xBar,barBot-uH-kH/2+4);}
+  if(uH>16){ctx.fillStyle='#fff';ctx.fillText('U',xBar,barBot-uH/2+4);}
+  // valeurs
+  ctx.textAlign='center';ctx.font='11px ui-monospace,monospace';
+  ctx.fillStyle=C_K;ctx.fillText('K='+K.toFixed(1),xBar,barBot+16);
+  ctx.fillStyle=C_U;ctx.fillText('U='+U.toFixed(1),xBar,barBot+30);
+
+  if(!paused){hist.push({y:y,v:v});if(hist.length>maxN)hist.shift();}
+
+  // ===== GRAPHE : y(t) et v(t), équilibre au milieu =====
+  ctx.fillStyle='#fafafa';ctx.fillRect(gx,gTop,gw,gBot-gTop);
+  ctx.strokeStyle='#e0e0e0';ctx.lineWidth=1;ctx.strokeRect(gx,gTop,gw,gBot-gTop);
+  ctx.strokeStyle='rgba(0,0,0,0.22)';ctx.lineWidth=1;ctx.setLineDash([4,4]);
+  ctx.beginPath();ctx.moveTo(gx,eqCy);ctx.lineTo(gx+gw,eqCy);ctx.stroke();ctx.setLineDash([]);
+  ctx.fillStyle=MUTE;ctx.font='11px system-ui,sans-serif';ctx.textAlign='right';ctx.fillText('temps →',gx+gw-6,gBot-6);
+
+  const halfH=(gBot-gTop)/2*0.9, vScale=A*W_;
+  function drawSine(key,col,lw){if(hist.length<2)return;ctx.strokeStyle=col;ctx.lineWidth=lw;ctx.beginPath();
+    for(let i=0;i<hist.length;i++){const px=gx+(i/(maxN-1))*gw;const val=hist[i][key];
+      const py=eqCy + (key==='y' ? (val/A) : -(val/vScale))*halfH; i===0?ctx.moveTo(px,py):ctx.lineTo(px,py);}ctx.stroke();}
+  drawSine('v',C_V,2);
+  drawSine('y',C_Y,2.4);
+  if(hist.length>0){const lastX=gx+((hist.length-1)/(maxN-1))*gw;
+    ctx.beginPath();ctx.arc(lastX,eqCy+(y/A)*halfH,3.4,0,Math.PI*2);ctx.fillStyle=C_Y;ctx.fill();
+    ctx.beginPath();ctx.arc(lastX,eqCy-(v/vScale)*halfH,3.2,0,Math.PI*2);ctx.fillStyle=C_V;ctx.fill();}
+
+  // légende
+  ctx.font='500 12px system-ui,sans-serif';ctx.textAlign='left';
+  let lx=gx,ly=gBot+18;
+  function leg(col,txt){ctx.fillStyle=col;ctx.fillRect(lx,ly-9,12,4);ctx.fillStyle=INK;ctx.fillText(txt,lx+17,ly);lx+=ctx.measureText(txt).width+46;}
+  leg(C_Y,'y(t) position');leg(C_V,'v(t) vitesse');
+
+  requestAnimationFrame(frame);
+}
+restart();frame();
+</script>
